@@ -86,6 +86,111 @@ export function ScannerClient({
 
     setIsScanning(true)
 
+    // Helper: product cache in localStorage keyed by barcode
+    const getProductFromCache = (code: string) => {
+      try {
+        const raw = localStorage.getItem("products_cache")
+        if (!raw) return null
+        const parsed = JSON.parse(raw)
+        return parsed[code] ?? null
+      } catch {
+        return null
+      }
+    }
+
+    const setProductToCache = (code: string, product: { product_name: string; uom: string; selling_price: number }) => {
+      try {
+        const raw = localStorage.getItem("products_cache")
+        const parsed = raw ? JSON.parse(raw) : {}
+        parsed[code] = product
+        localStorage.setItem("products_cache", JSON.stringify(parsed))
+      } catch {
+        // ignore
+      }
+    }
+
+    // If we have product cached locally, do an optimistic UI update and send request in background
+    const cachedProduct = getProductFromCache(barcode.trim())
+    if (cachedProduct) {
+      try {
+        const code = barcode.trim()
+        // Optimistic update
+        const existingIndex = stockCounts.findIndex((sc) => sc.barcode === code)
+        if (existingIndex >= 0) {
+          const updated = [...stockCounts]
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            count: updated[existingIndex].count + 1,
+            counted_at: new Date().toISOString(),
+          }
+          setStockCounts(updated)
+        } else {
+          const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+          const newEntry: StockCount = {
+            id: tempId,
+            location_id: location.id,
+            barcode: code,
+            product_name: cachedProduct.product_name,
+            uom: cachedProduct.uom,
+            selling_price: cachedProduct.selling_price,
+            count: 1,
+            counted_at: new Date().toISOString(),
+          }
+          setStockCounts([newEntry, ...stockCounts])
+        }
+
+        // Fire-and-forget request to persist on server; reconcile result when it comes back
+        (async () => {
+          try {
+            const response = await fetch("/api/stock-count/scan", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ locationId: location.id, barcode: code }),
+            })
+
+            if (response.ok) {
+              const { data } = await response.json()
+              // Replace or merge updated entry by barcode
+              setStockCounts((prev) => {
+                const idx = prev.findIndex((p) => p.barcode === data.barcode)
+                if (idx >= 0) {
+                  const copy = [...prev]
+                  copy[idx] = data
+                  return copy
+                }
+                return [data, ...prev]
+              })
+
+              // Cache product details for future scans
+              setProductToCache(code, {
+                product_name: data.product_name,
+                uom: data.uom,
+                selling_price: data.selling_price,
+              })
+            } else {
+              const error = await response.json().catch(() => ({}))
+              // Optionally revert optimistic update or inform user
+              console.error("Server scan error:", error)
+            }
+          } catch (err) {
+            console.error("Error persisting optimistic scan:", err)
+          }
+        })()
+
+        setBarcode("")
+        setIsScanning(false)
+        setTimeout(() => {
+          inputRef.current?.focus()
+          inputRef.current?.select()
+        }, 100)
+
+        return
+      } catch (err) {
+        console.error("Optimistic scan failed:", err)
+        // fallthrough to normal path
+      }
+    }
+
     try {
       const response = await fetch("/api/stock-count/scan", {
         method: "POST",
@@ -107,6 +212,28 @@ export function ScannerClient({
           setStockCounts(updated)
         } else {
           setStockCounts([data, ...stockCounts])
+        }
+
+        // Cache product details for future scans
+        try {
+          const setProductToCache = (code: string, product: { product_name: string; uom: string; selling_price: number }) => {
+            try {
+              const raw = localStorage.getItem("products_cache")
+              const parsed = raw ? JSON.parse(raw) : {}
+              parsed[code] = product
+              localStorage.setItem("products_cache", JSON.stringify(parsed))
+            } catch {
+              // ignore
+            }
+          }
+
+          setProductToCache(data.barcode, {
+            product_name: data.product_name,
+            uom: data.uom,
+            selling_price: data.selling_price,
+          })
+        } catch {
+          // ignore caching errors
         }
 
         setBarcode("")
@@ -156,8 +283,16 @@ export function ScannerClient({
       })
 
       if (response.ok) {
-        const { data } = await response.json()
-        setStockCounts(stockCounts.map((sc) => (sc.id === stockCountId ? data : sc)))
+        const body = await response.json().catch(() => ({}))
+        // If server indicates deletion, remove the item from the list
+        if (body.deleted) {
+          setStockCounts((prev) => prev.filter((sc) => sc.id !== stockCountId))
+        } else if (body.data) {
+          setStockCounts((prev) => prev.map((sc) => (sc.id === stockCountId ? body.data : sc)))
+        } else {
+          // Unexpected shape: ignore or log
+          console.warn("Unexpected response from update endpoint", body)
+        }
       }
     } catch (error) {
       console.error("Error updating count:", error)
@@ -195,7 +330,7 @@ export function ScannerClient({
     }
   }
 
-  const totalItems = stockCounts.reduce((sum, sc) => sum + sc.count, 0)
+  const totalItems = stockCounts.reduce((sum, sc) => sum + (sc?.count ?? 0), 0)
   const uniqueProducts = stockCounts.length
 
   return (
