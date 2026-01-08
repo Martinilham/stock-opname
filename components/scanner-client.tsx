@@ -48,6 +48,30 @@ export function ScannerClient({
     inputRef.current?.focus()
   }, [])
 
+  // Load cached stockCounts for this location (if any)
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(`stockcounts_${location.id}`)
+      if (cached) {
+        const parsed: StockCount[] = JSON.parse(cached)
+        if ((!initialStockCounts || initialStockCounts.length === 0) && parsed.length > 0) {
+          setStockCounts(parsed)
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [location.id])
+
+  // Keep localStorage cache updated when stockCounts change
+  useEffect(() => {
+    try {
+      localStorage.setItem(`stockcounts_${location.id}`, JSON.stringify(stockCounts))
+    } catch (e) {
+      // ignore
+    }
+  }, [location.id, stockCounts])
+
   // Auto focus edit input when editing starts
   useEffect(() => {
     if (editingId) {

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -22,6 +22,30 @@ type Location = {
 
 export function StockCountClient({ initialLocations }: { initialLocations: Location[] }) {
   const [locations, setLocations] = useState<Location[]>(initialLocations)
+  // Try to load cached locations from localStorage for faster perceived load
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem("locations_cache")
+      if (cached) {
+        const parsed: Location[] = JSON.parse(cached)
+        // If we have cached data and initialLocations is empty, use cache
+        if ((!initialLocations || initialLocations.length === 0) && parsed.length > 0) {
+          setLocations(parsed)
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [])
+
+  // Keep cache updated when locations change
+  useEffect(() => {
+    try {
+      localStorage.setItem("locations_cache", JSON.stringify(locations))
+    } catch (e) {
+      // ignore
+    }
+  }, [locations])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newLocationName, setNewLocationName] = useState("")
   const [newLocationDesc, setNewLocationDesc] = useState("")

@@ -2,6 +2,9 @@ import { createClient } from "@/lib/supabase/server"
 import { ScannerClient } from "@/components/scanner-client"
 import { notFound } from "next/navigation"
 
+// Revalidate this page every 60 seconds to reduce DB hits
+export const revalidate = 60
+
 export default async function ScanPage({ params }: { params: Promise<{ locationId: string }> }) {
   const { locationId } = await params
   const supabase = await createClient()

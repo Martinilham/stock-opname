@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
+// Revalidate this page every 60 seconds (ISR) to reduce DB hits and speed up responses
+export const revalidate = 60
 import { StockCountClient } from "@/components/stock-count-client"
 
 export default async function StockCountPage() {

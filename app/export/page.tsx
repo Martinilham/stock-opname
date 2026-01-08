@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import { ExportClient } from "@/components/export-client"
 
+// Revalidate this page every 60 seconds to cache export page server-side
+export const revalidate = 60
+
 export default async function ExportPage() {
   const supabase = await createClient()
 
